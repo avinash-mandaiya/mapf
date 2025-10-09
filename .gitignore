@@ -1,0 +1,28 @@
+# Ignore temporary and build files
+*.log
+*.sol
+*.err
+*.stats
+*.o
+*.d
+*.txt
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Vim swap/backup/undo files
+*.swp
+*.swo
+*.swx
+*.un~
+*.bak
+
+# macOS Finder metadata
+.DS_Store
+
+# Optional: VSCode settings (if collaborators use it)
+.vscode/
+
+# Other Files
+template.cpp
