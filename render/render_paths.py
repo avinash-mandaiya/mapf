@@ -1,8 +1,7 @@
-# render_iters.py
+# render_paths.py
 # Usage:
-#   python render_iters.py instance2.txt t1.sol
+#   python render_paths.py ../benchmarks/maze-32-32-2.map ../benchmarks/scen-even/maze-32-32-2-even-1.scen t3.sol 2 --save pac1.mp4 --interval 400
 #   # optional:
-#   # python render_iters.py instance2.txt t1.sol --interval 800
 #   # MPLBACKEND=Agg python render_iters.py instance2.txt t1.sol --save out.mp4
 
 import argparse
@@ -14,6 +13,7 @@ from matplotlib.collections import LineCollection
 from matplotlib.colors import Normalize
 from matplotlib.widgets import Button, Slider
 from matplotlib.patches import Rectangle
+from pathlib import Path
 
 # ---------- Parsing: instance/setup ----------
 
@@ -24,6 +24,77 @@ def _next_nonempty_tokens(lines_iter) -> Optional[List[str]]:
             continue
         return s.split()
     return None
+
+def load_movingai_map(map_path: str):
+    """
+    Returns: (width, height, free[x][y]) with origin at bottom-left.
+    free[x][y] = 1 if traversable ('.' or 'G'), else 0.
+    """
+    p = Path(map_path)
+    lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
+    if not lines or not lines[0].startswith("type"):
+        raise ValueError("Invalid map header: expected 'type ...' on first line.")
+
+    try:
+        H = int(lines[1].split()[1])
+        W = int(lines[2].split()[1])
+    except Exception as e:
+        raise ValueError("Failed to parse 'height'/'width' lines in the map.") from e
+
+    if lines[3].strip() != "map":
+        raise ValueError("Expected a line 'map' after width/height.")
+
+    rows = lines[4:4+H]
+    if len(rows) != H:
+        raise ValueError("Map file truncated (not enough rows).")
+
+    def is_free(ch: str) -> bool:
+        return ch in ('.', 'G')
+
+    # column-major free[x][y], math coords (y=0 bottom)
+    free = [[0 for _ in range(H)] for _ in range(W)]
+    for y_file, row in enumerate(rows):
+        if len(row) != W:
+            raise ValueError(f"Row width mismatch at file row {y_file}: got {len(row)}, expected {W}")
+        y = H - 1 - y_file  # flip to bottom-left origin
+        for x in range(W):
+            free[x][y] = 1 if is_free(row[x]) else 0
+    return W, H, free
+
+
+def load_movingai_scen(scen_path: str, k: int, map_height: int):
+    """
+    Load FIRST k agents from .scen and convert to math coords (bottom-left origin).
+    Returns: list of (sx, sy, gx, gy) in math coords.
+    """
+    p = Path(scen_path)
+    with p.open("r", encoding="utf-8", errors="replace") as fh:
+        header = fh.readline()
+        if not header or not header.startswith("version"):
+            raise ValueError("Scenario file missing 'version' header.")
+
+        agents = []
+        for line in fh:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split()
+            if len(parts) < 9:
+                raise ValueError(f"Bad .scen line: {line}")
+            # fields: bucket map_path map_w map_h sx sy gx gy optimal_len
+            _, _, mw, mh, sx_f, sy_f, gx_f, gy_f, _ = parts[:9]
+            sx_f, sy_f, gx_f, gy_f = map(int, (sx_f, sy_f, gx_f, gy_f))
+            # flip Y from file coords (top-left) to math coords (bottom-left)
+            sx, sy = sx_f, (map_height - 1 - sy_f)
+            gx, gy = gx_f, (map_height - 1 - gy_f)
+            agents.append((sx, sy, gx, gy))
+            if k > 0 and len(agents) >= k:
+                break
+    if k > 0 and len(agents) < k:
+        raise ValueError(f"Scenario has fewer than k={k} usable lines.")
+    return agents
+
+
 
 def parse_instance(path: str):
     """
@@ -148,13 +219,19 @@ def main():
     ap = argparse.ArgumentParser(
         description="Per-iteration renderer: grid & obstacles from instance file; paths from trajectory file; agent offsets and darker-start blue gradient."
     )
-    ap.add_argument("instance", help="Setup file (rows cols; obstacles; Nagents; sx sy gx gy)")
-    ap.add_argument("traj", help="Trajectory file (one line per agent per iteration; semicolon-separated x,y)")
+
+    ap.add_argument("map",  help=".map file (MovingAI ASCII grid)")
+    ap.add_argument("scen", help=".scen file (MovingAI scenario list)")
+    ap.add_argument("traj", help="trajectories file")
+    ap.add_argument("-A", "--agents", type=int, required=True, help="number of agents to load from .scen (first A lines)")
     ap.add_argument("--interval", type=int, default=800, help="ms between frames (iterations)")
     ap.add_argument("--save", help="Optional output (mp4/gif)")
     args = ap.parse_args()
 
-    rows, cols, obstacles, A, starts, goals = parse_instance(args.instance)
+    # Load map (W,H,free) and first A agents from scen
+    W, H, free_xy = load_movingai_map(args.map)
+    agents = load_movingai_scen(args.scen, args.agents, H)
+
     iters = parse_trajectories(args.traj, A)
     nIters = len(iters)
 

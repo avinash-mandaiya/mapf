@@ -1,6 +1,6 @@
 # ---------------- Project ----------------
 PROGRAM   := mapf
-SRC       := mapf.cpp
+SRC       := mapf.cpp MapfIO.cpp
 OBJ       := $(SRC:.cpp=.o)
 DEPS      := $(OBJ:.o=.d)
 
@@ -27,20 +27,28 @@ $(PROGRAM): $(OBJ)
 -include $(DEPS)
 
 # --------------- Run args ----------------
-# Usage: make run input_file=... id=... beta=... maxiter=... iterstride=... stoperr=... epsilon=... seed=... numrun=...
-input_file ?= instance3.txt
-id         ?= t3
-total_time = 8
+# Usage:
+#   make run map_path=... scen_path=... Zags=... id=... total_time=... beta=... \
+#            maxiter=... iterstride=... stoperr=... epsilon=... seed=... numrun=...
+
+# maze-32-32-2.map
+# empty-8-8.map
+
+map_path   ?= benchmarks/empty-16-16.map
+scen_path  ?= benchmarks/scen-even/empty-16-16-even-1.scen
+Zags       ?= 50
+id         ?= e45
+total_time ?= 30
 beta       ?= 0.9
-maxiter    ?= 50000
+maxiter    ?= 20000
 iterstride ?= 100
 stoperr    ?= 1e-5
-epsilon    ?= 0.000
-seed       ?= 2
+epsilon    ?= 0.01
+seed       ?= 10
 numrun     ?= 1
 
 run: $(PROGRAM)
-	./$(PROGRAM) $(input_file) $(id) $(total_time) $(beta) $(maxiter) $(iterstride) $(stoperr) $(epsilon) $(seed) $(numrun)
+	./$(PROGRAM) $(map_path) $(scen_path) $(Zags) $(id) $(total_time) $(beta) $(maxiter) $(iterstride) $(stoperr) $(epsilon) $(seed) $(numrun)
 
 # --------------- Utilities ---------------
 clean:

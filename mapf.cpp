@@ -14,8 +14,10 @@
 #include <cmath>
 #include <chrono>
 #include <cstdio>
+#include <cassert>
 
 #include "ArrayND.hpp"
+#include "MapfIO.hpp"
 
 // Structs
 
@@ -33,8 +35,10 @@ struct PairHash
 		}
 	};
 
+double TXerr, TYerr;
+
 // Global variables
-int Zrows, Zcols, Zags, Ztime;
+int Zags, Ztime;
 int Zobs, Znodes, Zedges;
 std::unordered_set<std::pair<int,int>, PairHash> Obstacles;
 
@@ -42,8 +46,13 @@ std::vector<int> coord2id;
 std::vector<std::pair<int,int>> id2coord;
 
 std::vector<std::pair<int,int>> edges;
+Array2D<int> node2edge;
+
 std::vector<int> self_edge_index;
 std::vector<TaskID> Tasks;
+
+GRID Map;
+std::vector<AGENT> Agents;
 
 // RRR variables
 
@@ -55,6 +64,9 @@ Array3D<double[2]> XC, XCA, XCR, XCB;
 
 double toterr;
 double beta,epsilon;
+
+// Tuning parameters
+double etaX, etaY;
 
 // Solution
 
@@ -75,7 +87,7 @@ std::mt19937 gen(12345);
 void urand_seed(unsigned int s) { gen.seed(s); }
 
 inline double sq(double diff) { return diff * diff; }
-inline int idx(int i, int j) { return i * Zcols + j; }
+inline int idx(int i, int j) { return i * Map.height + j; }
 
 double urand(double a, double b)
 	{
@@ -83,29 +95,41 @@ double urand(double a, double b)
 	return dist(gen);
 	}
 
-int setgrid()
+struct Map 
 	{
-	Znodes = Zrows * Zcols - Zobs;
+	int width = 0, height = 0;
 
-	coord2id.assign(Zrows * Zcols, -1);
+	std::vector<std::vector<uint8_t>> free;      // free[y][x] in {0,1}
+
+	// Convenience accessor
+	inline uint8_t at(int x, int y) const { return free[y][x]; }
+	};
+
+bool setupVariables()
+	{
+	Znodes = Map.height * Map.width - Map.obs;
+
+	coord2id.assign(Map.width * Map.height, -1);
 	id2coord.clear();
 	id2coord.reserve(Znodes);
 
 	int id = 0;
-	for (int i = 0; i < Zrows; ++i)
-		for (int j = 0; j < Zcols; ++j)
-			{
-			bool blocked = (Obstacles.find({i, j}) != Obstacles.end());
-
-			if (!blocked) 
+	for (int i = 0; i < Map.width; ++i)
+		for (int j = 0; j < Map.height; ++j)
+			if (Map.free[i][j]) 
 				{
 				coord2id[idx(i,j)] = id;
 				id2coord.push_back({i, j});
 				++id;
 				}
-			}
 
 	// Edges
+
+	node2edge.alloc(Znodes, Znodes, false);
+
+	for(int i = 0; i < Znodes; ++i)
+		for(int j = 0; j < Znodes; ++j)
+			node2edge[i][j] = -1;
 
 	static constexpr std::array<std::pair<int,int>, 5> dirs = {{ {0, 0}, {0, 1}, {1, 0}, {0,-1}, {-1,0} }};
 
@@ -117,16 +141,16 @@ int setgrid()
 	Zedges = 0;
 	for(int i = 0; i < Znodes; ++i)
 		{
-		auto [r, c] = id2coord[i];
-		for (auto [dr, dc] : dirs) 
+		auto [x, y] = id2coord[i];
+		for (auto [dx, dy] : dirs) 
 			{
-			int r2 = r + dr, c2 = c + dc;
+			int x2 = x + dx, y2 = y + dy;
 
 			// in-bounds?
-			if (r2 < 0 || r2 >= Zrows || c2 < 0 || c2 >= Zcols)
+			if (x2 < 0 || x2 >= Map.width || y2 < 0 || y2 >= Map.height)
 				continue;
 
-			int j = coord2id[idx(r2,c2)];
+			int j = coord2id[idx(x2,y2)];
 			if (j < 0) // obstacle?
 				continue;
 			
@@ -134,6 +158,7 @@ int setgrid()
 				{
 				edges.emplace_back(i, i);
 				self_edge_index[i] = Zedges;
+				node2edge[i][i] = Zedges;
 				Zedges++;
 				}
 
@@ -143,7 +168,9 @@ int setgrid()
 			else
 				{
 				edges.emplace_back(i, j);
+				node2edge[i][j] = Zedges;
 				edges.emplace_back(j, i);
+				node2edge[j][i] = Zedges+1;
 				Zedges += 2;
 				}
 			}
@@ -155,81 +182,29 @@ int setgrid()
 		return 0;
 		}
 
-	return 1;
-	}
+	std::ofstream stats(statsfile, std::ios::app);
 
-int read_mapf_instance(const std::string& filename)
-	{
-	std::ifstream infile(filename);
-	if (!infile)
-		{
-		std::cerr << "Error: could not open file " << filename << "\n";
-		return 0;
-		}
-
-	infile >> Zrows >> Zcols; // read grid dimensions
-	infile >> Zobs;           // read number of obstacles
-
-	std::cout << "Zrows=" << Zrows << " Zcols=" << Zcols << " Zobs=" << Zobs << '\n';
-
-	Obstacles.clear();
-
-	int r, c;
-	for (int i = 0; i < Zobs; ++i) 
-		{
-		infile >> r >> c;
-		Obstacles.insert({r, c});
-		}
-
-	if (Zobs != Obstacles.size())
-		{
-		std::cerr << "Error: Reading obstacles resulted in an error \n";
-		return 0;
-		}
-
-	if (!setgrid()) // Set up the grid/graph
-		return 0;
-
-	// Read Tasks 
-
-	infile >> Zags;           // read number of obstacles
+	stats   << "Number of agents: "     << Zags   << '\n'
+		<< "Number of grid sites: " << Znodes << '\n'
+		<< "Number of edges: "      << Zedges << '\n'
+		<< "Number of obstacles: "  << Map.obs<< '\n'
+		<< "Alloted time: "         << Ztime  << "\n\n";
 
 	Tasks.clear();
 	Tasks.reserve(Zags);
 
 	for (int i = 0; i < Zags; ++i) 
 		{
-		int sr, sc, gr, gc;
-
-		if (!(infile >> sr >> sc >> gr >> gc)) 
-			{
-			std::cerr << "Error: malformed task line for agent " << i << "\n";
-			return 0;
-			}
-
-		if (Obstacles.find({sr, sc}) != Obstacles.end())
-			{
-			std::cerr << "Error: Agent " << i << "is on a obstacle\n";
-			return 0;
-			}
-	
-		if (Obstacles.find({gr, gc}) != Obstacles.end())
-			{
-			std::cerr << "Error: Agent " << i << "is on a obstacle\n";
-			return 0;
-			}
-
-		Tasks.push_back({coord2id[idx(sr,sc)], coord2id[idx(gr,gc)]});
+		Tasks.push_back({coord2id[idx(Agents[i].sx, Agents[i].sy)], coord2id[idx(Agents[i].gx, Agents[i].gy)]});
+		stats << Agents[i].sx << '\t' << Agents[i].sy << "\t --> \t" << Agents[i].gx << '\t' << Agents[i].gy << '\n'; 
 		}
 
-	std::cout << "Number of agents:" << Zags << std::endl;
-	std::cout << "Number of grid sites:" << Znodes << std::endl;
-	std::cout << "Number of edges:" << Zedges << std::endl;
-	std::cout << "Alloted time:" << Ztime << std::endl;
-	std::cout << "Number of obstacles:" << Zobs << std::endl;
 
-	return 1;
+	stats.close();
+
+	return true;
 	}
+
 
 void makevars()
 	{
@@ -305,7 +280,7 @@ void projA(const Array3D<double[2]> &XCo, const Array3D<double> &YCo, const Arra
 	// Causality constraint + existence
 	// YCo = XCo[t] and XCo[t+1]			
 
-	double eta = 1.;
+	double eta = 0.5;
 
 	for(int t = 0; t < Ztime; ++t)
 		for(int a = 0; a < Zags; ++a)
@@ -325,7 +300,7 @@ void projA(const Array3D<double[2]> &XCo, const Array3D<double> &YCo, const Arra
 			for(int e = 0; e < Zedges; ++e)
 				{
 				auto [n1,n2] = edges[e];
-				double cur_relative_cost = 2. * (1. -  XCo[t][a][n1][0] - XCo[t][a][n2][1]) + eta * (1. - 2. * YCo[t][a][e]);
+				double cur_relative_cost = etaX * 2. * (1. -  XCo[t][a][n1][0] - XCo[t][a][n2][1]) + etaY * (1. - 2. * YCo[t][a][e]);
 
 				if (cur_relative_cost < min_relative_cost)
 					{
@@ -340,6 +315,68 @@ void projA(const Array3D<double[2]> &XCo, const Array3D<double> &YCo, const Arra
 			XCA[t][a][n2][1] = 1.;
 			}
 
+	for(int a = 0; a < Zags; ++a)
+		{
+		double min_relative_cost = std::numeric_limits<double>::infinity();
+		int min_index = -1;
+
+		for(int e = 0; e < Zedges; ++e)
+			{
+			YCA[0][a][e] = 0.;
+			YCA[Ztime-1][a][e] = 0.;
+			}
+
+		for(int n = 0; n < Znodes; ++n)
+			{
+			XCA[0][a][n][0] = 0.;
+			XCA[0][a][n][1] = 0.;
+
+			XCA[Ztime-1][a][n][0] = 0.;
+			XCA[Ztime-1][a][n][1] = 0.;
+			}
+
+		min_relative_cost = std::numeric_limits<double>::infinity();
+		min_index = -1;
+
+		for(int n = 0; n < Znodes; ++n)
+			{
+			if (node2edge[Tasks[a].start][n] < 0) 
+				continue;
+
+			double cur_relative_cost = 2. * (1. -  XCo[0][a][Tasks[a].start][0] - XCo[0][a][n][1]) + eta * (1. - 2. * YCo[0][a][node2edge[Tasks[a].start][n]]);
+
+			if (cur_relative_cost < min_relative_cost)
+				{
+				min_relative_cost = cur_relative_cost;
+				min_index = n;
+				}
+			}
+
+		XCA[0][a][Tasks[a].start][0] = 1.;
+		XCA[0][a][min_index][1] = 1.;
+		YCA[0][a][node2edge[Tasks[a].start][min_index]] = 1.;
+
+		min_relative_cost = std::numeric_limits<double>::infinity();
+		min_index = -1;
+
+		for(int n = 0; n < Znodes; ++n)
+			{
+			if (node2edge[n][Tasks[a].goal] < 0) 
+				continue;
+
+			double cur_relative_cost = 2. * (1. -  XCo[Ztime-1][a][Tasks[a].goal][1] - XCo[Ztime-1][a][n][0]) + eta * (1. - 2. * YCo[Ztime-1][a][node2edge[n][Tasks[a].goal]]);
+
+			if (cur_relative_cost < min_relative_cost)
+				{
+				min_relative_cost = cur_relative_cost;
+				min_index = n;
+				}
+			}
+
+		XCA[Ztime-1][a][Tasks[a].goal][1] = 1.;
+		XCA[Ztime-1][a][min_index][0] = 1.;
+		YCA[Ztime-1][a][node2edge[min_index][Tasks[a].goal]] = 1.;
+		}
 
 	// Each node can have atmost one agent (conflict-resolution)
 
@@ -382,6 +419,7 @@ void projA(const Array3D<double[2]> &XCo, const Array3D<double> &YCo, const Arra
 
 			if (n1 < n2)
 				{
+				assert(e + 1 < Zedges);
 				// combined agent vector for the (n1,n2) and (n2,n1) edges should be either zero or 1-hot vector 
 
 				double*		YEA_te1 = YEA[t][e];
@@ -414,10 +452,10 @@ void projA(const Array3D<double[2]> &XCo, const Array3D<double> &YCo, const Arra
 			}
 		}
 
-	for(int t = 0; t < Ztime; ++t)
-		for(int e = 0; e < Zedges; ++e)
-			for(int a = 0; a < Zags; ++a)
-				YEA[t][e][a] = YEo[t][e][a];
+//	for(int t = 0; t < Ztime; ++t)
+//		for(int e = 0; e < Zedges; ++e)
+//			for(int a = 0; a < Zags; ++a)
+//				YEA[t][e][a] = YEo[t][e][a];
 
 	// self edge variables in the crossing constraint are unused, so using them to apply the termination constraint
 
@@ -472,7 +510,7 @@ void projB(const Array3D<double[2]> &XCo, const Array3D<double> &YCo, const Arra
 			std::fill_n(ZVarY[t][a], Zedges, 0.0);
 			}
 
-	for(int t = 0; t < Ztime; ++t)
+	for(int t = 0; t < Ztime+1; ++t)
 		for(int a = 0; a < Zags; ++a)
 			{
 			std::fill_n(XT[t][a],    Znodes, 0.0);
@@ -499,7 +537,6 @@ void projB(const Array3D<double[2]> &XCo, const Array3D<double> &YCo, const Arra
 				ZVarX[t+1][a][n] += eta;
 				}
 			}
-
 
 	for(int t = 0; t < Ztime+1; ++t)
 		for(int n = 0; n < Znodes; ++n)
@@ -534,7 +571,7 @@ void projB(const Array3D<double[2]> &XCo, const Array3D<double> &YCo, const Arra
 		for(int a = 0; a < Zags; ++a)
 			for(int n = 0; n < Znodes; ++n)
 				XT[t][a][n] /= ZVarX[t][a][n];
-
+/*
 	for(int a = 0; a < Zags; ++a)
 		for(int n = 0; n < Znodes; ++n)
 			{
@@ -547,6 +584,7 @@ void projB(const Array3D<double[2]> &XCo, const Array3D<double> &YCo, const Arra
 		XT[0][a][Tasks[a].start] = 1.0;
 		XT[Ztime][a][Tasks[a].goal] = 1.0;
 		}
+*/
 
 	changeVar(XCB, YCB, XGB, YEB);
 	}
@@ -565,6 +603,9 @@ void RRR()
 	tXYerr = 0.;
 	toterr = 0.;
 	avgerr = 0.;
+	TXerr = 0.;
+	TYerr = 0.;
+
 
 	totVar = 0; 
 	totCons = 0; 
@@ -584,15 +625,20 @@ void RRR()
 				errXY[t][a] += sq(diff);
 				}
 
+			TYerr += errXY[t][a]; //////////////////////////////////////////////
+
 			for(int n = 0; n < Znodes; ++n)
 				{
 				diff = XCB[t][a][n][0] - XCA[t][a][n][0];
 				XC[t][a][n][0] += beta*diff;
 				errXY[t][a] += sq(diff);
+				TXerr += sq(diff); //////////////////////////////////////////////
 
 				diff = XCB[t][a][n][1] - XCA[t][a][n][1];
 				XC[t][a][n][1] += beta*diff;
 				errXY[t][a] += sq(diff);
+
+				TXerr += sq(diff); //////////////////////////////////////////////
 				}
 
 			tXYerr += errXY[t][a];
@@ -625,11 +671,12 @@ void RRR()
 			avgerr += errXG[t][n];
 			}
 
-        totVar += Ztime*Zags*Znodes;
+        totVar += (Ztime+1)*Zags*Znodes;
         toterr += tXGerr;
+	TXerr += tXGerr;
 
-        tXGerr /= Ztime*Zags*Znodes;
-        totCons += Ztime*Znodes;
+        tXGerr /= (Ztime+1)*Zags*Znodes;
+        totCons += (Ztime+1)*Znodes;
 
 	// No crossing conflict resolution 
 
@@ -642,6 +689,7 @@ void RRR()
 
 			if (n1 < n2)
 				{
+				assert(e + 1 < Zedges);
 				// combined agent vector for the (n1,n2) and (n2,n1) edges should be either zero or 1-hot vector 
 				totCons++;
 				
@@ -666,7 +714,7 @@ void RRR()
 				errYE[t][e] /= Zags*2.;
 				avgerr += errYE[t][e];
 
-				errYE[t][e+1] = errYE[t][e];
+				//errYE[t][e+1] = errYE[t][e];
 
 				e += 2;
 				}
@@ -699,6 +747,7 @@ void RRR()
         totVar += Ztime*Zedges*Zags;
         toterr += tYEerr;
 
+	TYerr += tYEerr;
         tYEerr /= Ztime*Zedges*Zags;
 
 	//totCons already added in the loop
@@ -706,27 +755,52 @@ void RRR()
 	toterr /= totVar;
 	avgerr /= totCons;
 
+	// Tuning Variable weights instead of constraints 
 
+	TXerr /= (3.*Ztime + 1.)*Zags*Znodes;
+	TYerr /= 2.*Ztime*Zags*Zedges;
+
+	//etaX *= (1. + epsilon*((2.*TXerr/(TXerr+TYerr)) - 1.));
+	//etaY *= (1. + epsilon*((2.*TYerr/(TXerr+TYerr)) - 1.));
+
+	etaX += epsilon*((2.*TXerr/(TXerr+TYerr)) - etaX);
+	etaY += epsilon*((2.*TYerr/(TXerr+TYerr)) - etaY);
+
+	TXerr = sqrt(TXerr);
+	TYerr = sqrt(TYerr);
+
+/*
         // weight tuning 
-
 	for(int t = 0; t < Ztime; ++t)
 		for(int a = 0; a < Zags; ++a)
-			etaXY[t][a] += epsilon*((errXY[t][a]/avgerr) - etaXY[t][a]);
+			//etaXY[t][a] += epsilon*((errXY[t][a]/avgerr) - etaXY[t][a]);
+			etaXY[t][a] *= (1. + epsilon*((errXY[t][a]/avgerr) - 1.));
 
 	for(int t = 0; t < Ztime+1; ++t)
 		for(int n = 0; n < Znodes; ++n)
-			etaXG[t][n] += epsilon*((errXG[t][n]/avgerr) - etaXG[t][n]);
+			//etaXG[t][n] += epsilon*((errXG[t][n]/avgerr) - etaXG[t][n]);
+			etaXG[t][n] *= (1. + epsilon*((errXG[t][n]/avgerr) - 1.));
 
 	for(int t = 0; t < Ztime; ++t)
 		for(int e = 0; e < Zedges; ++e)
-			etaYE[t][e] += epsilon*((errYE[t][e]/avgerr) - etaYE[t][e]);
-
+			{
+			auto [n1,n2] = edges[e];
+			if (n1 <= n2)
+				//etaYE[t][e] += epsilon*((errYE[t][e]/avgerr) - etaYE[t][e]);
+				etaYE[t][e] *= (1. + epsilon*((errYE[t][e]/avgerr) - 1.));
+			}
+*/
 
 	tXGerr = sqrt(tXGerr);
 	tYEerr = sqrt(tYEerr);
 	tXYerr = sqrt(tXYerr);
 
 	toterr = sqrt(toterr);
+
+
+
+
+
         }
 
 
@@ -813,11 +887,48 @@ int solve(int maxiter, int iterstride, double stoperr, bool log_iterations)
 				 << toterr << '\t'
 				 << tXYerr << ' '
 				 << tXGerr << ' '
-				 << tYEerr << '\n';
+				 << tYEerr << ' '
+				 << '\t'<< TXerr << ' '
+				 << '\t'<< TYerr << ' '
+				 << '\t'<< etaX << ' '
+				 << '\t'<< etaY << ' '
+				 << '\n';
 
 				printsol(solfile);
 				}
 			}
+
+/*
+		if (iter == maxiter)
+			{
+			for(int t = 0; t < Ztime; ++t)
+				{
+				for(int a = 0; a < Zags; ++a)
+					{
+					printf("%.4e \t %lf \t\n", errXY[t][a], etaXY[t][a]);
+	
+					if (errXY[t][a] > 1e-10)
+						{
+						for(int n = 0; n < Znodes; ++n)
+							for(int c = 0; c < 2; ++c)
+								{	
+								double diff = XCB[t][a][n][c] - XCA[t][a][n][c];
+								if (sq(diff) > 1e-20)
+									printf("%d %d %d %d \t %lf \t %lf\n", t,a,n,c, XCB[t][a][n][c] , XCA[t][a][n][c]);
+								}
+
+						for(int e = 0; e < Zedges; ++e)
+							{
+							double diff = YCB[t][a][e] - YCA[t][a][e];
+							if (sq(diff) > 1e-20)
+								printf("%d %d %d \t %lf \t %lf\n", t,a,e, YCB[t][a][e] , YCA[t][a][e]);
+							}
+						}
+					}
+				printf("\n");
+				}
+			}
+*/
 
 		if (toterr < stoperr) 
 			return iter;
@@ -840,6 +951,9 @@ void initialize_metric_parameters()
 	for(int t = 0; t < Ztime; ++t)
 		for(int e = 0; e < Zedges; ++e)
 			etaYE[t][e] = 1.;
+
+	etaX = 1.;
+	etaY = 1.;
 	}
 
 void init()
@@ -892,8 +1006,8 @@ void initSol(const std::string& filename, double lambda)
 			std::fill_n(YT[t][a], Zedges, 0.0);
 
 	std::string line;
-	int agent = 0;
-	while (std::getline(ifs, line) && agent < Zags) 
+	int agent_id = 0;
+	while (std::getline(ifs, line) && agent_id < Zags) 
 		{
 		std::stringstream ss(line);
 		std::string triplet;
@@ -910,10 +1024,10 @@ void initSol(const std::string& filename, double lambda)
 
 			int n = coord2id[idx(r,c)];
 			if (n >= 0 && n < Znodes) 
-				XT[t][agent][n] = 1.0;
+				XT[t][agent_id][n] = 1.0;
 			}
 
-		++agent; // next agent line
+		++agent_id; // next agent line
 		}
 
 
@@ -941,7 +1055,7 @@ void initSol(const std::string& filename, double lambda)
 	initialize_metric_parameters();
 	}
 
-void run_experiments(int numrun, int maxiter, int iterstride, double stoperr)
+void run_experiments(int numrun, int maxiter, int iterstride, double stoperr, int seed)
 	{
 	std::ios::sync_with_stdio(false);
 
@@ -956,7 +1070,7 @@ void run_experiments(int numrun, int maxiter, int iterstride, double stoperr)
 
 	for (int i = 0; i < numrun; ++i)
 		{
-		urand_seed(i); 
+		urand_seed(seed+i); 
 		init();
 		//initSol("solution.txt", 1.0);
 
@@ -973,6 +1087,7 @@ void run_experiments(int numrun, int maxiter, int iterstride, double stoperr)
 			++tot_success;
 			double iterpersec = iter / deltat;
 			stat << iter << '\t' << deltat << '\t' << iterpersec << '\n';
+			printf("%d \t %d \n",i,iter);
 			}
 		else       // failure path: write -1 as in C code
 			{
@@ -996,35 +1111,34 @@ void run_experiments(int numrun, int maxiter, int iterstride, double stoperr)
 
 int main(int argc, char* argv[]) 
 	{
-	if (argc != 11) 
+	if (argc != 13) 
 		{
 		std::cerr
 		<< "Usage:\n  " << argv[0]
-		<< " <input_file> <id> <total_time> <beta> <maxiter> <iterstride> <stoperr> <epsilon> <seed> <numrun>\n";
+		<< " <mapPath> <scenarioPath> <Zags> <runID> <total_time> <beta> <maxiter> <iterstride> <stoperr> <epsilon> <seed> <numrun>\n";
 		return EXIT_FAILURE;
 		}
 
 	// Parse args 
-	std::string input_file	= argv[1];
-	std::string id        	= argv[2];
-	int total_time		= std::stoi(argv[3]);
-	beta  		    	= std::stod(argv[4]);
-	int         maxiter   	= std::stoi(argv[5]);
-	int         iterstride	= std::stoi(argv[6]);
-	double      stoperr   	= std::stod(argv[7]);
-	epsilon   		= std::stod(argv[8]);
-	int         seed      	= std::stoi(argv[9]);
-	int         numrun    	= std::stoi(argv[10]);
+	const std::string mapPath  	= argv[1];
+	const std::string scenarioPath 	= argv[2];
+	Zags	 			= std::stoi(argv[3]);
+	const std::string runID        	= argv[4];
+	int total_time			= std::stoi(argv[5]);
+	beta  			    	= std::stod(argv[6]);
+	const int maxiter		= std::stoi(argv[7]);
+	const int iterstride		= std::stoi(argv[8]);
+	const double stoperr   		= std::stod(argv[9]);
+	epsilon 			= std::stod(argv[10]);
+	const int seed		      	= std::stoi(argv[11]);
+	const int numrun		= std::stoi(argv[12]);
 
 	Ztime = total_time;
 
 	// Derived filenames 
-	errfile   = id    + ".err";
-	statsfile = id    + ".stats";
-	solfile   = id    + ".sol";
-
-	if (!read_mapf_instance(input_file))
-		return 1;
+	errfile   = runID    + ".err";
+	statsfile = runID    + ".stats";
+	solfile   = runID    + ".sol";
 
 	std::ofstream ofs(solfile, std::ios::trunc);
 	if (!ofs) 
@@ -1046,11 +1160,25 @@ int main(int argc, char* argv[])
 		stats << argv[c] << ' ';
 	stats << "\n\n";
 
+	try 
+		{
+		loadInstance(mapPath, scenarioPath, Zags, Map, Agents, /*verify_passable=*/true);
+		} 
+	catch (const std::exception& e) 
+		{
+		std::cerr << "Load error: " << e.what() << "\n";
+		return 2;
+		}
+
+	stats << "Loaded map " << Map.width << "x" << Map.height << " with " << Agents.size() << " agents.\n";
 	stats.close();
+
+	setupVariables();
 
 	makevars();
 
-	run_experiments(numrun, maxiter, iterstride, stoperr);
+	run_experiments(numrun, maxiter, iterstride, stoperr, seed);
+
 /*
 	//init();
 

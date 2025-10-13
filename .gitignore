@@ -6,6 +6,7 @@
 *.o
 *.d
 *.txt
+*.zip
 
 # Python cache
 __pycache__/
