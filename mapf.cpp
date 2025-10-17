@@ -351,66 +351,11 @@ void projA(const Array3D<double[2]> &XCo, const Array3D<double> &YCo, const Arra
 					}
 				}
 
-			// min_relative_cost gives the nearest 1 hot vector (in the edge space)
-			// But if this 1 hot vector is not self edge on the goal then it might be selected or not 
-			// when the total cost is considered 
-
-			int ne = Tasks[a].goal;
-			int ee = self_edge_index[ne]; 
-
-			double waiting_cost = (FX[t][a][ne] == 0.0 || FX[t+1][a][ne] == 0.0) ? std::numeric_limits<double>::infinity()
-											: etaX * 2.0 * (1.0 - XCo[t][a][ne][0] - XCo[t][a][ne][1]) + etaY * (1.0 - 2.0 * YCo[t][a][ee]);
-
-			min_relative_cost -= waiting_cost;
-
-			cost[t * Zags + a] = Item{
-				min_relative_cost,
-				static_cast<uint16_t>(t),
-				static_cast<uint16_t>(a),
-				static_cast<uint16_t>(min_index)
-				};
-
-			//YCA[t][a][min_index] = 1.;
-			//auto [n1,n2] = edges[min_index];
-			//XCA[t][a][n1][0] = 1.;
-			//XCA[t][a][n2][1] = 1.;
-			}
-
-	sort_items(cost);
-
-	int Total_Cost = 119;
-	int current_cost = 0;
-
-	for (int i = 0; i < Ztime * Zags; ++i)
-		{
-		const Item& it = cost[i];
-		int t = it.i, a = it.j, e = it.k;
-
-		assert(e >= 0);
-		auto [n1,n2] = edges[e];
-
-		auto [x1,y1] = id2coord[n1];
-		auto [x2,y2] = id2coord[n2];
-		//printf("%d %d %d \t\t %d %d %d %d \t %lf\n",t,a,e,x1,y1,x2,y2,it.val);
-
-		int ne = Tasks[a].goal;
-
-		if (current_cost < Total_Cost && (n1 != n2 || n1 != ne))
-			{
-			YCA[t][a][e] = 1.;
+			YCA[t][a][min_index] = 1.;
+			auto [n1,n2] = edges[min_index];
 			XCA[t][a][n1][0] = 1.;
 			XCA[t][a][n2][1] = 1.;
-			current_cost++;
 			}
-		
-		else
-			{
-			int ee = self_edge_index[ne]; 
-			YCA[t][a][ee] = 1.;
-			XCA[t][a][ne][0] = 1.;
-			XCA[t][a][ne][1] = 1.;
-			}
-		}
 
 
 	// Each node can have atmost one agent (conflict-resolution)
@@ -599,36 +544,48 @@ void projB(const Array3D<double[2]> &XCo, const Array3D<double> &YCo, const Arra
 		for(int a = 0; a < Zags; ++a)
 			for(int n = 0; n < Znodes; ++n)
 				XT[t][a][n] /= ZVarX[t][a][n];
-/*
+
 	// Reducing the total cost
 
-	double total_cost = 0.;
+	double current_cost = 0.;
+	int feasible_edge_count = 0;
 
 	for(int t = 0; t < Ztime; ++t)
 		for(int a = 0; a < Zags; ++a)
 			for(int e = 0; e < Zedges; ++e)
 				{
 				auto [n1,n2] = edges[e];
+
 				if (n1 == n2 && n1 == Tasks[a].goal)
 					continue;
 
-				total_cost += YT[t][a][e];
-				
+				if (FX[t][a][n1] == 0 || FX[t+1][a][n2] == 0)
+					continue;
+
+				current_cost += YT[t][a][e];
+				feasible_edge_count++;				
 				}
 
-	double max_cost_allowed = 50.;
-	if (total_cost > max_cost_allowed)
+	double Total_Cost = 354.;
+
+	if (current_cost > Total_Cost)
 		for(int t = 0; t < Ztime; ++t)
 			for(int a = 0; a < Zags; ++a)
 				for(int e = 0; e < Zedges; ++e)
 					{
 					auto [n1,n2] = edges[e];
+
 					if (n1 == n2 && n1 == Tasks[a].goal)
 						continue;
 
-					YT[t][a][e] -= (total_cost - max_cost_allowed)/(Ztime*Zags*(Zedges-1.));
+					if (FX[t][a][n1] == 0 || FX[t+1][a][n2] == 0)
+						{
+						YT[t][a][e] = 0.;
+						continue;
+						}
+
+					YT[t][a][e] -= (current_cost - Total_Cost)/feasible_edge_count;
 					}
-*/
 
 	changeVar(XCB, YCB, XGB, YEB);
 	}
