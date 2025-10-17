@@ -33,17 +33,19 @@ $(PROGRAM): $(OBJ)
 
 # maze-32-32-2.map
 # empty-8-8.map
+map_id     = maze-32-32-2 
+scenario   = 1
 
-map_path   ?= benchmarks/empty-16-16.map
-scen_path  ?= benchmarks/scen-even/empty-16-16-even-1.scen
-Zags       ?= 50
-id         ?= e45
-total_time ?= 30
+map_path   ?= benchmarks/maze-32-32-2.map
+scen_path  ?= benchmarks/scen-even/maze-32-32-2-even-1.scen
+Zags       ?= 3
+id         ?= m23
+total_time ?= 69
 beta       ?= 0.9
-maxiter    ?= 20000
-iterstride ?= 100
+maxiter    ?= 100000
+iterstride ?= 200
 stoperr    ?= 1e-5
-epsilon    ?= 0.01
+epsilon    ?= 0.1
 seed       ?= 10
 numrun     ?= 1
 

@@ -7,6 +7,7 @@
 *.d
 *.txt
 *.zip
+*.mp4
 
 # Python cache
 __pycache__/
