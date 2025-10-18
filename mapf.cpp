@@ -67,15 +67,12 @@ Array3D<int> FX;
 Array3D<double> XG, XGA, XGR, XGB;	Array2D<double> etaXG, errXG;	double tXGerr;
 Array3D<double> YE, YEA, YER, YEB;	Array2D<double> etaYE, errYE;	double tYEerr;
 
-Array3D<double> YC, YCA, YCR, YCB; 	Array2D<double> etaXY, errXY; 	double tXYerr;
-Array3D<double[2]> XC, XCA, XCR, XCB;
+Array3D<double> YC, YCA, YCR, YCB; 	Array2D<double> etaYC, errYC; 	double tXYerr;
+Array3D<double[2]> XC, XCA, XCR, XCB;	Array2D<double> etaXC, errXC;
 
 double toterr;
 double beta,epsilon;
 int iter;
-
-// Tuning parameters
-double etaX, etaY;
 
 // Solution
 
@@ -265,13 +262,15 @@ void makevars()
 	YEB.alloc(Ztime, Zedges, Zags, false);
 
 	// Metric parameters
-	etaXY.alloc(Ztime, Zags, false);
-	etaXG.alloc(Ztime+1, Znodes, false);
-	etaYE.alloc(Ztime, Zedges, false);
+	etaXC.alloc(Ztime, Zags, false);
+	etaYC.alloc(Ztime, Zags, false);
+	//etaXG.alloc(Ztime+1, Znodes, false);
+	//etaYE.alloc(Ztime, Zedges, false);
 
-	errXY.alloc(Ztime, Zags, false);
-	errXG.alloc(Ztime+1, Znodes, false);
-	errYE.alloc(Ztime, Zedges, false);
+	errXC.alloc(Ztime, Zags, false);
+	errYC.alloc(Ztime, Zags, false);
+	//errXG.alloc(Ztime+1, Znodes, false);
+	//errYE.alloc(Ztime, Zedges, false);
 
 	// Other parameters
 
@@ -342,7 +341,9 @@ void projA(const Array3D<double[2]> &XCo, const Array3D<double> &YCo, const Arra
 				if (FX[t][a][n1] == 0 || FX[t+1][a][n2] == 0)
 					continue;
 
-				double cur_relative_cost = etaX * 2. * (1. -  XCo[t][a][n1][0] - XCo[t][a][n2][1]) + etaY * (1. - 2. * YCo[t][a][e]);
+				double cur_relative_cost = etaXC[t][a] * (1. - 2. * XCo[t][a][n1][0]) 
+							 + etaXC[t][a] * (1. - 2. * XCo[t][a][n2][1]) 
+							 + etaYC[t][a] * (1. - 2. * YCo[t][a][e]);
 
 				if (cur_relative_cost < min_relative_cost)
 					{
@@ -357,7 +358,7 @@ void projA(const Array3D<double[2]> &XCo, const Array3D<double> &YCo, const Arra
 			XCA[t][a][n2][1] = 1.;
 			}
 
-
+/*
 	// Each node can have atmost one agent (conflict-resolution)
 
 	for(int t = 0; t < Ztime+1; ++t)
@@ -445,6 +446,7 @@ void projA(const Array3D<double[2]> &XCo, const Array3D<double> &YCo, const Arra
 			if (YEo[t][node_index][a] > 0.5)
 				YEA[t][node_index][a] = 1.;
 			}
+*/
 	}
 
 
@@ -463,6 +465,7 @@ void reflect(const Array3D<double[2]> &XCo, const Array3D<double> &YCo, const Ar
 				}
 			}
 
+/*
 	for(int t = 0; t < Ztime+1; ++t)
 		for(int n = 0; n < Znodes; ++n)
 			for(int a = 0; a < Zags; ++a)
@@ -472,6 +475,7 @@ void reflect(const Array3D<double[2]> &XCo, const Array3D<double> &YCo, const Ar
 		for(int e = 0; e < Zedges; ++e)
 			for(int a = 0; a < Zags; ++a)
 				YER[t][e][a] = 2.*YEo[t][e][a] - YE[t][e][a];
+*/
 	}
 
 void projB(const Array3D<double[2]> &XCo, const Array3D<double> &YCo, const Array3D<double> &XGo, const Array3D<double> &YEo)
@@ -493,24 +497,22 @@ void projB(const Array3D<double[2]> &XCo, const Array3D<double> &YCo, const Arra
 	for(int t = 0; t < Ztime; ++t)
 		for(int a = 0; a < Zags; ++a)
 			{
-			double eta = etaXY[t][a]; 
-
 			for(int e = 0; e < Zedges; ++e)
 				{
-				YT[t][a][e] += eta * YCo[t][a][e];
-				ZVarY[t][a][e] += eta;
+				YT[t][a][e] += etaYC[t][a] * YCo[t][a][e];
+				ZVarY[t][a][e] += etaYC[t][a];
 				}
 
 			for(int n = 0; n < Znodes; ++n)
 				{
-				XT[t][a][n] += eta * XCo[t][a][n][0];
-				ZVarX[t][a][n] += eta;
+				XT[t][a][n] += etaXC[t][a] * XCo[t][a][n][0];
+				ZVarX[t][a][n] += etaXC[t][a];
 
-				XT[t+1][a][n] += eta * XCo[t][a][n][1];
-				ZVarX[t+1][a][n] += eta;
+				XT[t+1][a][n] += etaXC[t][a] * XCo[t][a][n][1];
+				ZVarX[t+1][a][n] += etaXC[t][a];
 				}
 			}
-
+/*
 	for(int t = 0; t < Ztime+1; ++t)
 		for(int n = 0; n < Znodes; ++n)
 			{
@@ -534,6 +536,7 @@ void projB(const Array3D<double[2]> &XCo, const Array3D<double> &YCo, const Arra
 				ZVarY[t][a][e] += eta;
 				}
 			}
+*/
 
 	for(int t = 0; t < Ztime; ++t)
 		for(int a = 0; a < Zags; ++a)
@@ -548,7 +551,7 @@ void projB(const Array3D<double[2]> &XCo, const Array3D<double> &YCo, const Arra
 	// Reducing the total cost
 
 	double current_cost = 0.;
-	int feasible_edge_count = 0;
+	double lambda = 0;
 
 	for(int t = 0; t < Ztime; ++t)
 		for(int a = 0; a < Zags; ++a)
@@ -563,10 +566,10 @@ void projB(const Array3D<double[2]> &XCo, const Array3D<double> &YCo, const Arra
 					continue;
 
 				current_cost += YT[t][a][e];
-				feasible_edge_count++;				
+				lambda += 1./etaYC[t][a];
 				}
 
-	double Total_Cost = 354.;
+	double Total_Cost = 119.;
 
 	if (current_cost > Total_Cost)
 		for(int t = 0; t < Ztime; ++t)
@@ -584,7 +587,7 @@ void projB(const Array3D<double[2]> &XCo, const Array3D<double> &YCo, const Arra
 						continue;
 						}
 
-					YT[t][a][e] -= (current_cost - Total_Cost)/feasible_edge_count;
+					YT[t][a][e] -= (current_cost - Total_Cost)/(etaYC[t][a]*lambda);
 					}
 
 	changeVar(XCB, YCB, XGB, YEB);
@@ -616,42 +619,43 @@ void RRR()
 	for(int t = 0; t < Ztime; ++t)
 		for(int a = 0; a < Zags; ++a)
 			{
-			errXY[t][a] = 0.;
+			errXC[t][a] = 0.;
+			errYC[t][a] = 0.;
 
 			for(int e = 0; e < Zedges; ++e)
 				{
 				diff = YCB[t][a][e] - YCA[t][a][e];
 				YC[t][a][e] += beta*diff;
-				errXY[t][a] += sq(diff);
+				errYC[t][a] += sq(diff);
 				}
 
-			TYerr += errXY[t][a]; //////////////////////////////////////////////
+			tXYerr += errYC[t][a];
+			errYC[t][a] /= Zedges;
 
 			for(int n = 0; n < Znodes; ++n)
 				{
 				diff = XCB[t][a][n][0] - XCA[t][a][n][0];
 				XC[t][a][n][0] += beta*diff;
-				errXY[t][a] += sq(diff);
-				TXerr += sq(diff); //////////////////////////////////////////////
+				errXC[t][a] += sq(diff);
 
 				diff = XCB[t][a][n][1] - XCA[t][a][n][1];
 				XC[t][a][n][1] += beta*diff;
-				errXY[t][a] += sq(diff);
-
-				TXerr += sq(diff); //////////////////////////////////////////////
+				errXC[t][a] += sq(diff);
 				}
 
-			tXYerr += errXY[t][a];
-			errXY[t][a] /= (Zedges + 2. * Znodes);
-			avgerr += errXY[t][a];
+			tXYerr += errXC[t][a];
+			errXC[t][a] /= 2.*Znodes;
+
+			avgerr += errXC[t][a] + errYC[t][a];
 			}
 
         totVar += Ztime * Zags * (Zedges + 2. * Znodes);
         toterr += tXYerr;
 
         tXYerr /= Ztime * Zags * (Zedges + 2. * Znodes);
-        totCons += Ztime * Zags;
+        totCons += Ztime * Zags * 2.;
 
+/*
 	// Conflict resolution at a node
 
 	for(int t = 0; t < Ztime+1; ++t)
@@ -750,7 +754,7 @@ void RRR()
 
 	TYerr += tYEerr;
         tYEerr /= Ztime*Zedges*Zags;
-
+*/
 	//totCons already added in the loop
 
 	toterr /= totVar;
@@ -758,17 +762,13 @@ void RRR()
 
 	// Tuning Variable weights instead of constraints 
 
-	TXerr /= (3.*Ztime + 1.)*Zags*Znodes;
-	TYerr /= 2.*Ztime*Zags*Zedges;
 
-	//etaX *= (1. + epsilon*((2.*TXerr/(TXerr+TYerr)) - 1.));
-	//etaY *= (1. + epsilon*((2.*TYerr/(TXerr+TYerr)) - 1.));
-
-	etaX += epsilon*((2.*TXerr/(TXerr+TYerr)) - etaX);
-	etaY += epsilon*((2.*TYerr/(TXerr+TYerr)) - etaY);
-
-	TXerr = sqrt(TXerr);
-	TYerr = sqrt(TYerr);
+	for(int t = 0; t < Ztime; ++t)
+		for(int a = 0; a < Zags; ++a)
+			{
+			etaYC[t][a] += epsilon*((errYC[t][a]/avgerr) - etaYC[t][a]);
+			etaXC[t][a] += epsilon*((errXC[t][a]/avgerr) - etaXC[t][a]);
+			}
 /*
         // weight tuning 
 	for(int t = 0; t < Ztime; ++t)
@@ -879,10 +879,10 @@ int solve(int maxiter, int iterstride, double stoperr, bool log_iterations)
 				 << tXYerr << ' '
 				 << tXGerr << ' '
 				 << tYEerr << ' '
-				 << '\t'<< TXerr << ' '
-				 << '\t'<< TYerr << ' '
-				 << '\t'<< etaX << ' '
-				 << '\t'<< etaY << ' '
+				 //<< '\t'<< TXerr << ' '
+				 //<< '\t'<< TYerr << ' '
+				 //<< '\t'<< etaX << ' '
+				 //<< '\t'<< etaY << ' '
 				 << '\n';
 
 				printsol(solfile);
@@ -931,10 +931,15 @@ int solve(int maxiter, int iterstride, double stoperr, bool log_iterations)
 
 void initialize_metric_parameters()
 	{
+
 	for(int t = 0; t < Ztime; ++t)
 		for(int a = 0; a < Zags; ++a)
-			etaXY[t][a] = 1.;
+			{
+			etaXC[t][a] = 1.;
+			etaYC[t][a] = 1.;
+			}
 
+/*
 	for(int t = 0; t < Ztime+1; ++t)
 		for(int n = 0; n < Znodes; ++n)
 			etaXG[t][n] = 1.;
@@ -942,9 +947,7 @@ void initialize_metric_parameters()
 	for(int t = 0; t < Ztime; ++t)
 		for(int e = 0; e < Zedges; ++e)
 			etaYE[t][e] = 1.;
-
-	etaX = 1.;
-	etaY = 1.;
+*/
 	}
 
 void init()

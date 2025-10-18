@@ -38,15 +38,15 @@ scenario   = 1
 
 map_path   ?= benchmarks/maze-32-32-2.map
 scen_path  ?= benchmarks/scen-even/maze-32-32-2-even-1.scen
-Zags       ?= 8
-id         ?= m24
+Zags       ?= 3
+id         ?= t23
 total_time ?= 69
 beta       ?= 0.9
-maxiter    ?= 200000
-iterstride ?= 500
+maxiter    ?= 50000
+iterstride ?= 200
 stoperr    ?= 1e-8
-epsilon    ?= 0.01
-seed       ?= 11
+epsilon    ?= 0.0001
+seed       ?= 10
 numrun     ?= 1
 
 run: $(PROGRAM)
