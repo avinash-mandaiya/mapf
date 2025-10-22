@@ -38,19 +38,20 @@ scenario   = 1
 
 map_path   ?= benchmarks/maze-32-32-2.map
 scen_path  ?= benchmarks/scen-even/maze-32-32-2-even-1.scen
-Zags       ?= 8
-id         ?= t34
-total_time ?= 69
+Zags       ?= 3
+id         ?= x28
+Ztime      ?= 80
+Total_Cost ?= 119
 beta       ?= 0.9
 maxiter    ?= 100000
 iterstride ?= 200
 stoperr    ?= 1e-8
-epsilon    ?= 1.
+epsilon    ?= 0.05
 seed       ?= 10
 numrun     ?= 1
 
 run: $(PROGRAM)
-	./$(PROGRAM) $(map_path) $(scen_path) $(Zags) $(id) $(total_time) $(beta) $(maxiter) $(iterstride) $(stoperr) $(epsilon) $(seed) $(numrun)
+	./$(PROGRAM) $(map_path) $(scen_path) $(Zags) $(id) $(Ztime) $(Total_Cost) $(beta) $(maxiter) $(iterstride) $(stoperr) $(epsilon) $(seed) $(numrun)
 
 # --------------- Utilities ---------------
 clean:
