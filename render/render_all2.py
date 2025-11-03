@@ -404,7 +404,7 @@ def main():
         # Create line objects for each error column
         error_plot_colors = plt.cm.tab10(np.linspace(0, 1, len(error_cols)))
         for i, col in enumerate(error_cols):
-            line, = ax_error.plot([], [], '-o', linewidth=0.5, markersize=1,
+            line, = ax_error.plot([], [], '-o', linewidth=2, markersize=4,
                                  color=error_plot_colors[i],
                                  label=f'Error Col {col}' if len(error_cols) > 1 else 'Total Error')
             error_lines.append(line)
@@ -591,6 +591,21 @@ def main():
 
     # --- output ---
     if args.save:
+        # Hide all UI elements for saving
+        ax_slide.set_visible(False)
+        ax_prev.set_visible(False)
+        ax_play.set_visible(False)
+        ax_next.set_visible(False)
+        ax_save.set_visible(False)
+        if args.mode == "map+error":
+            ax_save_err.set_visible(False)
+        
+        # Adjust layout to remove extra space
+        if args.mode == "map":
+            plt.subplots_adjust(left=0.08, right=0.98, top=0.96, bottom=0.08)
+        else:
+            plt.subplots_adjust(left=0.08, right=0.95, top=0.96, bottom=0.08, wspace=0.30)
+        
         ext = args.save.lower().split(".")[-1]
         fps = max(1, 1000 // max(1, args.interval))
         try:
@@ -602,9 +617,33 @@ def main():
                 print(f"Animation saved to: {args.save}")
             else:
                 print("Unknown extension; use .mp4 or .gif. Showing window instead.")
+                # Restore UI for showing
+                ax_slide.set_visible(True)
+                ax_prev.set_visible(True)
+                ax_play.set_visible(True)
+                ax_next.set_visible(True)
+                ax_save.set_visible(True)
+                if args.mode == "map+error":
+                    ax_save_err.set_visible(True)
+                if args.mode == "map":
+                    plt.subplots_adjust(left=0.08, right=0.98, top=0.96, bottom=0.30)
+                else:
+                    plt.subplots_adjust(left=0.08, right=0.95, top=0.96, bottom=0.25, wspace=0.30)
                 plt.show()
         except Exception as e:
             print(f"Save failed: {e}\nFalling back to interactive window.")
+            # Restore UI for showing
+            ax_slide.set_visible(True)
+            ax_prev.set_visible(True)
+            ax_play.set_visible(True)
+            ax_next.set_visible(True)
+            ax_save.set_visible(True)
+            if args.mode == "map+error":
+                ax_save_err.set_visible(True)
+            if args.mode == "map":
+                plt.subplots_adjust(left=0.08, right=0.98, top=0.96, bottom=0.30)
+            else:
+                plt.subplots_adjust(left=0.08, right=0.95, top=0.96, bottom=0.25, wspace=0.30)
             plt.show()
     else:
         plt.show()
