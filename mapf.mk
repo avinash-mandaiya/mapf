@@ -38,10 +38,10 @@ scenario   = 1
 
 map_path   ?= benchmarks/maze-32-32-2.map
 scen_path  ?= benchmarks/scen-even/maze-32-32-2-even-1.scen
-Zags       ?= 3
-id         ?= x28
-Ztime      ?= 80
-Total_Cost ?= 119
+Zags       ?= 8
+id         ?= z17
+Ztime      ?= 69
+Total_Cost ?= 370
 beta       ?= 0.9
 maxiter    ?= 100000
 iterstride ?= 200
